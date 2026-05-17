@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 烟雾监控</title>
-    <!-- 使用 Paho MQTT 库 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
@@ -12,20 +11,20 @@
         .value { font-size: 2.5rem; font-weight: bold; color: #333; margin: 1rem 0; }
         .status { color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
         input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-        button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 1rem; width: 100%; }
-        button:hover { background-color: #0056b3; }
+        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 1rem; width: 100%; }
+        button:hover { background: #0056b3; }
     </style>
 </head>
 <body>
     <div class="card">
         <h2>ESP32 烟雾监控</h2>
-        <div id="status" class="status">正在连接服务器...</div>
+        <div class="status" id="status">正在连接服务器...</div>
 
         <div>烟雾数值</div>
-        <div id="smokeValue" class="value">--</div>
+        <div class="value" id="smokeValue">--</div>
 
         <div>温度 / 湿度</div>
-        <div id="thValue" class="value">-- / --</div>
+        <div class="value" id="tempHumiValue">-- / --</div>
 
         <input type="number" id="thresholdInput" placeholder="输入报警阈值 (例如: 2000)">
         <button onclick="sendThreshold()">发送阈值到 ESP32</button>
@@ -33,80 +32,76 @@
 
     <script>
         // ================= 配置区域 =================
-        const UID = "c242d5db2b79258b3cb0533f8a736018"; // 请填入你的巴法云UID
-        const TOPIC = "smokeTopic";     // 请填入你的主题
-        const CLIENT_ID = "web_" + Math.random().toString(16).substr(2, 8); // 随机客户端ID
+        const UID = "请填入你的巴法云UID"; // 必填：你的巴法云UID
+        const TOPIC_SMOK = "请填入你的烟雾主题"; // 必填：订阅的主题（如 myesp32smok）
+        const TOPIC_SET = "请填入你的设置主题"; // 必填：发送的主题（如 myesp32set）
+        // ===========================================
 
-        // ================= 核心连接逻辑 =================
-        // 根据你提供的文档截图，这里使用了官方指定的 9504 端口和 /wss 路径
-        const HOST = "bemfa.com";
-        const PORT = 9504;
-        const PATH = "/wss";
+        // 检查配置是否填写
+        if (UID === "请填入你的巴法云UID") {
+            alert("请先在代码中填写你的巴法云UID和主题！");
+        }
 
-        // 创建客户端实例
-        const client = new Paho.MQTT.Client(HOST, PORT, PATH, CLIENT_ID);
+        // 连接参数（严格按照官方文档）
+        const client = new Paho.MQTT.Client("bemfa.com", 9504, "web_client_" + Math.random());
 
-        // 设置回调处理函数
-        client.onConnectionLost = onConnectionLost;
-        client.onMessageArrived = onMessageArrived;
-
-        // 连接选项
-        const options = {
-            useSSL: true, // 必须开启 SSL
-            userName: UID, // 巴法云要求用户名是UID
+        const connectOptions = {
             onSuccess: onConnect,
-            onFailure: function(e) {
+            onFailure: function (e) {
                 console.error("连接失败:", e);
-                document.getElementById("status").innerHTML = "连接失败: " + e.errorMessage;
+                document.getElementById('status').innerText = "连接失败: " + e.errorMessage;
+            },
+            useSSL: true,
+            timeout: 3,
+            // 关键修复：即使不需要密码，也要给一个空字符串，防止浏览器报错
+            userName: UID,
+            password: ""
+        };
+
+        client.onConnectionLost = function (responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("连接断开: " + responseObject.errorMessage);
+                document.getElementById('status').innerText = "连接断开，正在重连...";
+                // 尝试自动重连
+                setTimeout(() => { client.connect(connectOptions); }, 3000);
             }
         };
 
-        // 发起连接
-        console.log("正在连接到 wss://" + HOST + ":" + PORT + PATH);
-        client.connect(options);
+        client.onMessageArrived = function (message) {
+            const topic = message.destinationName;
+            const payload = message.payloadString;
+            console.log("收到消息: " + payload + " 来自主题: " + topic);
+
+            if (topic === TOPIC_SMOK) {
+                // 假设消息格式为 "烟雾值,温度,湿度" 例如 "1200,25,60"
+                const parts = payload.split(',');
+                if (parts.length === 3) {
+                    document.getElementById('smokeValue').innerText = parts[0];
+                    document.getElementById('tempHumiValue').innerText = parts[1] + " / " + parts[2];
+                } else {
+                    // 如果格式不对，直接显示原始数据
+                    document.getElementById('smokeValue').innerText = payload;
+                }
+            }
+        };
 
         function onConnect() {
-            console.log("已连接到巴法云");
-            document.getElementById("status").innerHTML = "● 已连接";
-            document.getElementById("status").style.color = "green";
-
-            // 订阅主题
-            client.subscribe(TOPIC);
-            console.log("已订阅主题: " + TOPIC);
+            console.log("已连接到服务器");
+            document.getElementById('status').innerText = "已连接";
+            client.subscribe(TOPIC_SMOK);
         }
 
-        function onConnectionLost(responseObject) {
-            if (responseObject.errorCode !== 0) {
-                console.log("连接断开: " + responseObject.errorMessage);
-                document.getElementById("status").innerHTML = "连接断开，正在重试...";
-                document.getElementById("status").style.color = "red";
-
-                // 尝试重连
-                setTimeout(() => {
-                    client.connect(options);
-                }, 3000);
-            }
-        }
-
-        function onMessageArrived(message) {
-            console.log("收到消息: " + message.payloadString);
-            const payload = message.payloadString;
-
-            // 更新烟雾数值
-            document.getElementById("smokeValue").innerHTML = payload;
-        }
+        // 发起连接
+        client.connect(connectOptions);
 
         function sendThreshold() {
-            const val = document.getElementById("thresholdInput").value;
+            const val = document.getElementById('thresholdInput').value;
             if (!val) {
-                alert("请输入数值");
+                alert("请输入阈值");
                 return;
             }
-
-            // 向主题发送消息（假设ESP32订阅了同一个主题或者有特定的下发主题）
-            // 注意：巴法云下发通常需要特定的主题格式，这里假设直接发到 myesp32
             const message = new Paho.MQTT.Message(val);
-            message.destinationName = TOPIC;
+            message.destinationName = TOPIC_SET;
             client.send(message);
             alert("阈值 " + val + " 已发送");
         }
