@@ -10,73 +10,78 @@
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 320px; text-align: center; }
         .value { font-size: 2.5rem; font-weight: bold; color: #333; margin: 1rem 0; }
         .status { color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
-        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-        button { background: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; width: 100%; font-size: 1rem; }
+        input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 1rem; }
         button:hover { background: #0056b3; }
     </style>
 </head>
 <body>
     <div class="card">
         <h2>ESP32 烟雾监控</h2>
-        <div id="status" class="status">正在连接...</div>
+        <p id="status" class="status">正在连接服务器...</p>
 
-        <div>烟雾数值</div>
+        <h3>烟雾数值</h3>
         <div id="smokeValue" class="value">--</div>
 
-        <div>输入报警阈值 (例如: 2000)</div>
+        <h3>输入报警阈值 (例如: 2000)</h3>
         <input type="number" id="thresholdInput" placeholder="输入数值">
         <button onclick="sendThreshold()">发送阈值到 ESP32</button>
     </div>
 
     <script>
-        // ================= 配置区 =================
-        const UID = "c242d5db2b79258b3cb0533f8a736018";
-        const TOPIC = "smokeTopic";
-        // =========================================
+        // 配置信息
+        const uid = "c242d5db2b79258b3cb0533f8a736018"; // 你的私钥
+        const topic = "smokeTopic";                    // 你的主题
+        const host = "bemfa.com";
+        const port = 9504;
 
-        // 核心修复：使用 wss:// (加密) 和 /ws 路径
-        const client = new Paho.MQTT.Client("bemfa.com", 9504, "web_" + Math.random().toString(16).substr(2, 8));
-
-        client.onConnectionLost = (responseObject) => {
-            document.getElementById('status').innerText = "连接断开: " + responseObject.errorMessage;
-            console.log("连接断开", responseObject);
-        };
-
-        client.onMessageArrived = (message) => {
-            console.log("收到消息:", message.payloadString);
-            document.getElementById('smokeValue').innerText = message.payloadString;
-        };
+        // 创建 MQTT 客户端 (注意路径是 /wss)
+        const client = new Paho.MQTT.Client(host, port, "/wss", "web_" + Math.random());
 
         // 连接选项
         const options = {
-            timeout: 3,
-            // 巴法云必须传用户名(UID)，密码为空字符串
-            userName: UID,
-            password: "",
-            useSSL: true, // 强制开启SSL
-            onSuccess: () => {
-                document.getElementById('status').innerText = "已连接";
-                client.subscribe(TOPIC);
-            },
-            onFailure: (e) => {
-                document.getElementById('status').innerText = "连接失败: " + e.errorMessage;
-                console.error("连接失败", e);
+            useSSL: true,
+            userName: uid,
+            password: "", // 必须设为空字符串，不能是 undefined
+            onSuccess: onConnect,
+            onFailure: function(e) {
+                console.error("连接失败:", e);
+                document.getElementById("status").innerText = "连接失败: " + e.errorMessage;
             }
         };
 
         // 发起连接
+        client.onConnectionLost = onConnectionLost;
+        client.onMessageArrived = onMessageArrived;
         client.connect(options);
 
-        function sendThreshold() {
-            const val = document.getElementById('thresholdInput').value;
-            if (!val) return alert("请输入数值");
+        function onConnect() {
+            console.log("已连接到巴法云");
+            document.getElementById("status").innerText = "已连接";
+            client.subscribe(topic);
+        }
 
-            // 巴法云发布消息格式：topic#msg
-            const payload = `${TOPIC}#${val}`;
-            const message = new Paho.MQTT.Message(payload);
-            message.destinationName = TOPIC;
+        function onConnectionLost(responseObject) {
+            if (responseObject.errorCode !== 0) {
+                console.log("连接断开: " + responseObject.errorMessage);
+                document.getElementById("status").innerText = "连接断开: " + responseObject.errorMessage;
+            }
+        }
+
+        function onMessageArrived(message) {
+            const payload = message.payloadString;
+            console.log("收到消息: " + payload);
+            document.getElementById("smokeValue").innerText = payload;
+        }
+
+        function sendThreshold() {
+            const val = document.getElementById("thresholdInput").value;
+            if (!val) return;
+
+            const message = new Paho.MQTT.Message(val);
+            message.destinationName = topic;
             client.send(message);
-            alert("已发送: " + val);
+            alert("阈值已发送: " + val);
         }
     </script>
 </body>
