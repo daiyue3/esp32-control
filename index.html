@@ -97,7 +97,7 @@
         // 接收消息回调
         function onMessageArrived(message) {
             const payload = message.payloadString;
-            console.log("收到消息:", JSON.parse(payload));
+            console.log("收到消息:", JSON.parse(payload), JSON.parse(payload).smoke);
             
             // 这里你可以根据 ESP32 发送的数据格式来解析
             // 比如假设数据是 "smoke:100,temp:25,humi:60"
