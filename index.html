@@ -27,7 +27,7 @@
         <h3>温度 / 湿度</h3>
         <div class="value" id="tempHumValue">-- / --</div>
 
-        <h3>输入报警阈值 (例如: 2000)</h3>
+        <h3>输入报警阈值 (当前: <span id="thresholdSpan">--</span>)</h3>
         <input type="number" id="thresholdInput" placeholder="输入数值">
         <button onclick="sendThreshold()">发送阈值到 ESP32</button>
     </div>
@@ -101,11 +101,13 @@
             result = JSON.parse(payload)
             console.log("收到消息:", result);
             
-            // 这里你可以根据 ESP32 发送的数据格式来解析
-            // 比如假设数据是 "smoke:100,temp:25,humi:60"
-            document.getElementById('smokeValue').innerText = JSON.parse(payload).smoke || "--";
-            document.getElementById('tempHumValue').innerText = JSON.parse(payload).temp.toFixed(1) + "℃" + " / " + JSON.parse(payload).humi.toFixed(1) + "%";
-            
+            if (typeof result == 'object' && result != null) {
+                document.getElementById('smokeValue').innerText = result.smoke || "--";
+                document.getElementById('thresholdSpan').innerText = result.threshold || "--";
+                document.getElementById('tempHumValue').innerText = result.temp.toFixed(1) + "℃" + " / " + result.humi.toFixed(1) + "%";
+            } else {
+                document.getElementById('thresholdSpan').innerText = result
+            }
         }
 
         // 发送阈值函数
@@ -114,7 +116,7 @@
             if (!val) return;
 
             if (client && client.isConnected()) {
-                const message = new Paho.MQTT.Message({smoke: result.smoke, temp: result.temp, humi: result.humi, alarm: result.alarm, threshold: val} );
+                const message = new Paho.MQTT.Message(val);
                 message.destinationName = config.topic;
                 client.send(message);
                 console.log("发送阈值:", val);
