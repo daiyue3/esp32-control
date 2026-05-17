@@ -3,124 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 烟雾监控 (参考小程序逻辑)</title>
-    <!-- 引入在线的 MQTT 库，参考小程序引入库的思路 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <title>ESP32 烟雾监控</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
         .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 320px; text-align: center; }
         .value { font-size: 2.5rem; font-weight: bold; color: #333; margin: 1rem 0; }
         .status { color: #888; font-size: 0.9rem; margin-bottom: 1rem; }
         input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-        button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-size: 1rem; width: 100%; }
+        button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; width: 100%; font-size: 1rem; }
         button:hover { background-color: #0056b3; }
     </style>
 </head>
 <body>
     <div class="card">
         <h2>ESP32 烟雾监控</h2>
-        <div class="status" id="statusText">正在连接...</div>
+        <div id="status" class="status">正在连接...</div>
 
-        <h3>烟雾数值</h3>
-        <div class="value" id="smokeValue">--</div>
+        <div>烟雾数值</div>
+        <div id="smoke" class="value">--</div>
 
-        <h3>温度 / 湿度</h3>
-        <div class="value" id="tempHumValue">-- / --</div>
+        <div>温度 / 湿度</div>
+        <div id="temp-humi" class="value">-- / --</div>
 
-        <h3>输入报警阈值 (例如: 2000)</h3>
+        <div style="margin-top: 1rem; text-align: left; font-size: 0.9rem; font-weight: bold;">输入报警阈值 (例如: 2000)</div>
         <input type="number" id="thresholdInput" placeholder="输入数值">
         <button onclick="sendThreshold()">发送阈值到 ESP32</button>
     </div>
 
     <script>
-        // ================= 配置区域 (参考小程序的 data) =================
-        const config = {
-            uid: "c242d5db2b79258b3cb0533f8a736018", // 你的密钥，参考小程序的 uid
-            topic: "smokeTopic", // 你的主题，参考小程序的 topic
-            host: "bemfa.com",
-            port: 9504, // 参考小程序代码里的 9504 端口
-            path: "/wss" // 参考小程序代码里的路径
+        // --- 配置区域 (已根据你的要求填入) ---
+        const uid = "c242d5db2b79258b3cb0533f8a736018"; // 你的私钥
+        const topic = "smokeTopic";                  // 你的主题
+        const clientId = "web_" + Math.random().toString(16).substr(2, 8); // 随机客户端ID
+
+        // --- MQTT 连接逻辑 ---
+        const client = new Paho.MQTT.Client("bemfa.com", 9504, clientId);
+
+        client.onConnectionLost = function (responseObject) {
+            document.getElementById('status').innerText = "连接断开: " + responseObject.errorMessage;
+            console.log("连接断开", responseObject);
         };
-        // ================================================================
 
-        let client;
-
-        // 初始化 MQTT 连接，参考小程序的 mqttConnect 函数
-        function connect() {
-            // 创建客户端，参考小程序的 clientId 配置
-            client = new Paho.MQTT.Client(
-                config.host, 
-                config.port, 
-                config.path, 
-                config.uid // 关键：这里直接用 uid 作为 clientId
-            );
-
-            // 连接选项，参考小程序的 options
-            const options = {
-                keepAliveInterval: 60, // 心跳间隔，对应小程序的 keepalive
-                cleanSession: true,    // 对应小程序的 clean
-                useSSL: true,          // 强制使用 SSL
-                // 注意：网页版 Paho 库不需要显式设置 protocolVersion 为 4，它默认支持
-                onSuccess: onConnect,
-                onFailure: function (error) {
-                    console.error("连接失败:", error);
-                    document.getElementById('statusText').innerText = "连接失败: " + error.errorMessage;
-                }
-            };
-
-            // 设置回调函数
-            client.onConnectionLost = onConnectionLost;
-            client.onMessageArrived = onMessageArrived;
-
-            // 发起连接
-            client.connect(options);
-        }
-
-        // 连接成功回调
-        function onConnect() {
-            console.log("连接服务器成功");
-            document.getElementById('statusText').innerText = "已连接";
-            // 订阅主题
-            client.subscribe(config.topic);
-        }
-
-        // 连接丢失回调
-        function onConnectionLost(responseObject) {
-            if (responseObject.errorCode !== 0) {
-                console.log("连接丢失:", responseObject.errorMessage);
-                document.getElementById('statusText').innerText = "连接丢失，正在重试...";
-                // 参考小程序的重连逻辑
-                setTimeout(connect, 3000);
-            }
-        }
-
-        // 接收消息回调
-        function onMessageArrived(message) {
+        client.onMessageArrived = function (message) {
             const payload = message.payloadString;
             console.log("收到消息:", payload);
-            
-            // 这里你可以根据 ESP32 发送的数据格式来解析
-            // 比如假设数据是 "smoke:100,temp:25,humi:60"
-            document.getElementById('smokeValue').innerText = payload;
-        }
 
-        // 发送阈值函数
+            try {
+                // 尝试解析 JSON 数据
+                const data = JSON.parse(payload);
+
+                // 更新页面显示
+                if (data.smoke !== undefined) {
+                    document.getElementById('smoke').innerText = data.smoke;
+                }
+                if (data.temp !== undefined && data.humi !== undefined) {
+                    document.getElementById('temp-humi').innerText = data.temp + " / " + data.humi.toFixed(1);
+                }
+
+            } catch (e) {
+                console.error("JSON解析失败", e);
+            }
+        };
+
+        // 连接选项
+        const options = {
+            useSSL: false,
+            userName: uid,      // 用户名填私钥
+            password: "",       // 密码留空
+            timeout: 3,
+            onSuccess: function () {
+                console.log("连接成功");
+                document.getElementById('status').innerText = "已连接";
+                client.subscribe(topic);
+            },
+            onFailure: function (error) {
+                document.getElementById('status').innerText = "连接失败: " + error.errorMessage;
+                console.error("连接失败", error);
+            }
+        };
+
+        // 发起连接
+        client.connect(options);
+
+        // --- 发送功能 ---
         function sendThreshold() {
             const val = document.getElementById('thresholdInput').value;
-            if (!val) return;
-
-            if (client && client.isConnected()) {
+            if (val) {
+                // 发送纯文本数值
                 const message = new Paho.MQTT.Message(val);
-                message.destinationName = config.topic;
+                message.destinationName = topic;
                 client.send(message);
-                console.log("发送阈值:", val);
-            } else {
-                alert("未连接到服务器");
+                console.log("已发送阈值:", val);
+                alert("已发送: " + val);
             }
         }
-
-        // 页面加载完成后执行
-        window.onload = connect;
     </script>
 </body>
 </html>
