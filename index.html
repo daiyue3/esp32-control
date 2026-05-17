@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>烟雾报警远程监控</title>
+    <!-- 引入 MQTT.js 库 -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        :root {
+            --primary: #007AFF;
+            --bg: #F2F2F7;
+            --card: #FFFFFF;
+            --text: #1C1C1E;
+            --gray: #8E8E93;
+            --danger: #FF3B30;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+            padding-bottom: 80px; /* 给底部留空间 */
+        }
+        h1 { font-size: 22px; margin-bottom: 20px; text-align: center; font-weight: 700; }
+        h2 { font-size: 17px; margin: 0 0 10px 0; color: var(--gray); font-weight: 400; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* 卡片样式 */
+        .card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .data-value { font-size: 24px; font-weight: 600; color: var(--text); }
+        .data-unit { font-size: 14px; color: var(--gray); margin-left: 4px; }
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .status-off { background: #E5E5EA; color: var(--gray); }
+        .status-on { background: var(--danger); color: white; animation: blink 1s infinite; }
+
+        /* 输入框区域 */
+        .input-group {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .input-row { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--gray); }
+        input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #E5E5EA;
+            border-radius: 8px;
+            font-size: 16px;
+            box-sizing: border-box;
+            background: var(--bg);
+        }
+
+        /* 按钮 */
+        button {
+            width: 100%;
+            padding: 15px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:active { background: #0056b3; }
+
+        /* 连接状态 */
+        #connection-status {
+            text-align: center;
+            font-size: 12px;
+            color: var(--gray);
+            margin-top: 10px;
+        }
+
+        @keyframes blink { 50% { opacity: 0.6; } }
+    </style>
+</head>
+<body>
+
+    <h1>环境监测控制台</h1>
+
+    <!-- 数据显示区域 -->
+    <div class="card">
+        <div>
+            <h2>烟雾浓度 (ADC)</h2>
+            <div class="data-value" id="val-smoke">--</div>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 15px;">
+        <div class="card" style="flex:1; margin-bottom: 15px;">
+            <h2>温度</h2>
+            <div class="data-value"><span id="val-temp">--</span><span class="data-unit">°C</span></div>
+        </div>
+        <div class="card" style="flex:1; margin-bottom: 15px;">
+            <h2>湿度</h2>
+            <div class="data-value"><span id="val-humi">--</span><span class="data-unit">%</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>报警状态</h2>
+        <div class="status-badge status-off" id="val-alarm">SAFE</div>
+    </div>
+
+    <hr style="border: 0; border-top: 1px solid #E5E5EA; margin: 20px 0;">
+
+    <!-- 控制发送区域 -->
+    <div class="input-group">
+        <div class="input-row">
+            <label for="input-threshold">设置报警阈值 (Threshold)</label>
+            <input type="number" id="input-threshold" placeholder="例如: 200" value="200">
+        </div>
+        <button onclick="sendData()">🚀 发送新阈值</button>
+    </div>
+
+    <div id="connection-status">正在连接服务器...</div>
+
+    <script>
+        // ================= 配置区域 =================
+        const options = {
+            clientId: "web_client_" + Math.random().toString(16).substr(2, 8), // 随机客户端ID
+            username: "你的私钥", // <--- 这里填入你的私钥
+            password: "", // 巴法云通常不需要密码，留空即可
+            connectTimeout: 4000,
+            clean: true
+        };
+        const topic = "smokeTopic"; // <--- 这里填入你的主题
+        const host = "wss://mqtts.bemfa.com:9502"; // 巴法云 WebSocket 安全连接地址
+        // ============================================
+
+        // 连接客户端
+        const client = mqtt.connect(host, options);
+
+        const statusDom = document.getElementById('connection-status');
+        const valSmoke = document.getElementById('val-smoke');
+        const valTemp = document.getElementById('val-temp');
+        const valHumi = document.getElementById('val-humi');
+        const valAlarm = document.getElementById('val-alarm');
+
+        // 连接成功
+        client.on('connect', function () {
+            statusDom.innerHTML = "✅ 已连接到巴法云";
+            statusDom.style.color = "green";
+            client.subscribe(topic, function (err) {
+                if (!err) {
+                    console.log("已订阅主题: " + topic);
+                }
+            });
+        });
+
+        // 接收消息
+        client.on('message', function (topic, message) {
+            // message 是 Buffer，转成字符串
+            const msgStr = message.toString();
+            console.log("收到消息:", msgStr);
+
+            try {
+                // 尝试解析 JSON
+                const data = JSON.parse(msgStr);
+
+                // 更新界面
+                if(data.smoke !== undefined) valSmoke.innerText = data.smoke;
+                if(data.temp !== undefined) valTemp.innerText = data.temp.toFixed(1);
+                if(data.humi !== undefined) valHumi.innerText = data.humi.toFixed(1);
+
+                // 处理报警状态
+                if(data.alarm === "ON") {
+                    valAlarm.innerText = "⚠️ 危险";
+                    valAlarm.className = "status-badge status-on";
+                } else {
+                    valAlarm.innerText = "SAFE";
+                    valAlarm.className = "status-badge status-off";
+                }
+
+                // 同步输入框的阈值（如果收到的消息里有阈值）
+                if(data.threshold !== undefined) {
+                    document.getElementById('input-threshold').value = data.threshold;
+                }
+
+            } catch (e) {
+                console.error("JSON解析失败", e);
+            }
+        });
+
+        // 发送数据的函数
+        function sendData() {
+            const thresholdVal = document.getElementById('input-threshold').value;
+
+            // 构造和你截图一模一样的 JSON 格式
+            // 注意：这里我们只发送控制指令，或者你可以发送全量数据来“伪造”状态
+            // 根据你的需求，通常是发送阈值让板子更新
+            const payload = {
+                "threshold": parseInt(thresholdVal)
+            };
+
+            const jsonStr = JSON.stringify(payload);
+
+            client.publish(topic, jsonStr, function (err) {
+                if (err) {
+                    alert("发送失败: " + err);
+                } else {
+                    console.log("发送成功:", jsonStr);
+                    // 简单的震动反馈（手机支持的话）
+                    if (navigator.vibrate) navigator.vibrate(50);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
