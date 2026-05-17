@@ -128,5 +128,48 @@
         // 页面加载完成后执行
         window.onload = connect;
     </script>
+
+    <!-- 以下为新增的蜂鸣器报警代码，完全独立于上面的逻辑 -->
+    <script>
+        // 等待页面加载完成
+        document.addEventListener('DOMContentLoaded', function() {
+            // 1. 创建一个隐藏的音频元素（短促的蜂鸣声）
+            const audio = new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+            audio.preload = 'auto';
+
+            // 2. 获取页面上的 DOM 元素
+            const smokeEl = document.getElementById('smokeValue');
+            const inputEl = document.getElementById('thresholdInput');
+
+            // 3. 用于防止重复播放的锁
+            let isAlerting = false;
+
+            // 4. 监听烟雾数值的变化
+            const observer = new MutationObserver(() => {
+                // 获取当前页面显示的烟雾值
+                let currentSmoke = parseInt(smokeEl.innerText) || 0;
+                // 实时获取输入框里的阈值
+                let threshold = parseInt(inputEl.value) || 0;
+
+                // 如果数值有效，且烟雾值超过了你输入的阈值
+                if (currentSmoke > 0 && threshold > 0 && currentSmoke > threshold) {
+                    if (!isAlerting) {
+                        isAlerting = true;
+                        // 播放蜂鸣声 (克隆节点防止被中断)
+                        audio.cloneNode(true).play().catch(e => console.log('播放被阻止:', e));
+                        console.log('🚨 蜂鸣器报警：烟雾超标！', currentSmoke, '>', threshold);
+                    }
+                } else {
+                    // 如果数值回落，解锁报警
+                    isAlerting = false;
+                }
+            });
+
+            // 开始观察烟雾数值标签的内容变化
+            if (smokeEl) {
+                observer.observe(smokeEl, { childList: true, subtree: true, characterData: true });
+            }
+        });
+    </script>
 </body>
 </html>
